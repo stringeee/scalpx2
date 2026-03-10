@@ -28,6 +28,24 @@ class ConfigLoader {
     }
   }
 
+  static Future<ProfileConfig> reloadConfig(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        return _createDefaultConfig();
+      }
+
+      final contents = await file.readAsString();
+      final jsonData = json.decode(contents);
+
+      final config = ProfileConfig.fromJson(jsonData);
+
+      return config;
+    } catch (e) {
+      return _createDefaultConfig();
+    }
+  }
+
   static Future<void> saveConfig(ProfileConfig config, String filePath) async {
     try {
       final file = File(filePath);

@@ -34,7 +34,7 @@ class CreateFuturesOrderRequest {
     // ТЕЙК-ПРОФИТ (15% вместо 25%)
     final double takeProfitPrice = takeProfitPriceCalc(
       isBinance: isBinance,
-      leverage: 20,
+      leverage: leverage!,
       price: price,
       isBid: isBid,
     );
@@ -43,8 +43,8 @@ class CreateFuturesOrderRequest {
     final stopLossPrice = calculateStopLossPrice(
       isBid: isBid,
       price: price,
-      leverage: 20,
-      lossPercent: 20,
+      leverage: leverage!,
+      lossPercent: 5,
     ); // 0.50% для 100x
     // isBid ? price - 1 : price + 1;
 
@@ -73,7 +73,7 @@ class CreateFuturesOrderRequest {
         'vol': vol,
         'external_id': externalId,
         // 'leverage': leverage,
-        'leverage': 20,
+        'leverage': leverage,
       };
 
       print('[ORDER] $res');

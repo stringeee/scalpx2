@@ -59,10 +59,10 @@ double takeProfitPriceCalc({
     isBid: isBid,
     price: price,
     leverage: leverage,
-    profitPercent: isBinance
-        ? (injector<Program>().config?.binance.binanceTakeProfit ?? 15.0)
-        : (injector<Program>().config?.hyperLiquid.hlTakeProfit ?? 15.0),
-    // profitPercent: 5,
+    // profitPercent: isBinance
+    //     ? (injector<Program>().config?.binance.binanceTakeProfit ?? 15.0)
+    //     : (injector<Program>().config?.hyperLiquid.hlTakeProfit ?? 15.0),
+    profitPercent: 2.5,
   );
 
   return takeProfitPrice;

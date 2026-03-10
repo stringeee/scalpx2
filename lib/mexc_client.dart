@@ -4,7 +4,7 @@ import 'package:scalpex2/candle.dart';
 class MexcClient {
   final Dio _dio = Dio(
     BaseOptions(
-      baseUrl: 'https://api.mexc.com',
+      baseUrl: 'https://fapi.binance.com',
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 10),
     ),
@@ -21,9 +21,9 @@ class MexcClient {
       );
 
       final response = await _dio.get(
-        '/api/v3/klines',
+        '/fapi/v1/klines',
         queryParameters: {
-          'symbol': symbol.toUpperCase(),
+          'symbol': symbol,
           'interval': interval,
           'limit': limit,
         },

@@ -358,7 +358,8 @@ class ExecutionManager {
         side: openSide,
         vol: double.parse(qty.toStringAsFixed(0)),
         externalId: openExt,
-        leverage: injector<Program>().leveragePerCoin(mx),
+        // leverage: injector<Program>().leveragePerCoin(mx),
+        leverage: 10,
         isBid: side == 'BID',
         isBinance: exchange != 'HYPERLIQUID',
       );
@@ -498,7 +499,7 @@ class ExecutionManager {
 
     print('[ORDER_CHECK_TIMER] Starting 1min timer for $symbol ($externalId)');
 
-    _orderCheckTimers[symbol] = Timer(Duration(seconds: 25), () {
+    _orderCheckTimers[symbol] = Timer(Duration(seconds: 60), () {
       _checkOrderFilled(symbol, externalId);
     });
   }

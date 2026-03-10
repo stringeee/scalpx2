@@ -3,7 +3,7 @@
         "user": "alex",
         "nativeMexcApiKey": "mx0vglO196hOGQHir9",
         "secretKey": "c397d91ecf7242e6bee943c6c6189002",
-        "webKey": "WEB1a8e66db523da5ed6a57c08231fca2c25ee90960568323e7d9f38e404545cd43",
+        "webKey": "WEB453a4afcbca64405f7c6f977eeeaf8b9467043fae758c4b05cebc8d6cb190bcc",
         "binance": {
             "useBinance": true,
             "binanceTakeProfit": 15,
@@ -12,7 +12,7 @@
         "hyperLiquid": {
             "useHyperLiquid": true,
             "hlTakeProfit": 20,
-            "hlBalanceUsage": 0.01
+            "hlBalanceUsage": 0.95
         }
     }
 }

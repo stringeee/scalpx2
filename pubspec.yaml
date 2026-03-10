@@ -8,8 +8,12 @@ environment:
 
 # Add regular dependencies here.
 dependencies:
+  hyperliquid_dart_sdk:
+    git:
+      url: https://github.com/stringeee/hyperliquid_dart_sdk
+      ref: main  # или tag/commit
   path: ^1.9.0
-  web_socket_channel: ^2.2.0
+  web_socket_channel: ^3.0.1
   dio: ^5.0.0
   http: ^1.6.0
   injectable: ^1.5.3

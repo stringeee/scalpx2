@@ -2,53 +2,53 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:hyperliquid_dart_sdk/hyperliquid_dart_sdk.dart';
 import 'package:scalpex2/candle.dart';
-import 'package:scalpex2/execution_manager.dart';
 import 'package:scalpex2/mexc_client.dart';
 import 'package:scalpex2/rsi_data.dart';
+import 'package:scalpex2/shared/take_profit_price_calc.dart';
 import 'package:scalpex2/telegram_signal_client.dart';
 import 'package:scalpex2/wae_signal.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-class MexcFuturesSignalBot {
+class MexcFuturesMk1 {
   final String symbol;
   final String timeframe;
   final String restTimeframe;
+  final String parentTimeframe;
   late TelegramSignalClient telegramClient;
   late WebSocketChannel _channel;
+  late WebSocketChannel _parentChannel;
   final List<Candle> _candles = [];
+  final List<Candle> _parentCandles = [];
   bool? _lastSignalWasLong;
+  bool? parentLastSignalWasLong;
   final bool useTrade;
-  final ExecutionManager executionManager;
+  final HyperliquidExchangeClient exchangeClient;
+  final ResolvedPerpMarket resolvedPerpMarket;
 
-  MexcFuturesSignalBot({
+  MexcFuturesMk1({
     required this.symbol,
     this.timeframe = 'Min1',
     required String botToken,
     required String chatId,
-    required this.executionManager,
     required this.restTimeframe,
     this.useTrade = false,
+    required this.parentTimeframe,
+    required this.exchangeClient,
+    required this.resolvedPerpMarket,
+    this.parentLastSignalWasLong,
   }) {
     telegramClient = TelegramSignalClient(botToken: botToken, chatId: chatId);
   }
 
   MexcClient mexcClient = MexcClient();
 
-  // Структура для хранения свечи
-
   Future<void> connect() async {
     print('🔄 Подключение к фьючерсному WebSocket MEXC...');
-    // Важно: используем фьючерсный эндпойнт[citation:1]
     final uri = Uri.parse(
-      'wss://stream.binance.com:9443/ws/${symbol.split('_').join('').toLowerCase()}@kline_$restTimeframe',
+      'wss://fstream.binance.com/ws/${symbol.split('_').join('').toLowerCase()}@kline_$restTimeframe',
     );
-    // _channel = WebSocketChannel.connect(uri);
-
-    // Отправляем ping каждые 15 секунд для поддержания соединения[citation:1]
-    // Timer.periodic(Duration(seconds: 15), (_) {
-    //   _channel.sink.add(jsonEncode({'method': 'ping'}));
-    // });
 
     final historicalData = await mexcClient.fetchKlineData(
       symbol: symbol.split('_').join(),
@@ -58,11 +58,13 @@ class MexcFuturesSignalBot {
 
     _candles.addAll(historicalData);
 
-    // Небольшая задержка перед подпиской
     await Future.delayed(Duration(seconds: 1));
     _channel = WebSocketChannel.connect(uri);
     _channel.stream.listen(
-      _handleIncomingMessage,
+      (data) {
+        // print(data);
+        _handleIncomingMessage(data, false);
+      },
       onError: (error) => print('❌ Ошибка WebSocket: $error'),
       onDone: () {
         print('📴 Соединение закрыто');
@@ -71,22 +73,46 @@ class MexcFuturesSignalBot {
     );
   }
 
-  void _handleIncomingMessage(dynamic message) {
+  Future<void> connectParent() async {
+    print('🔄 Подключение к фьючерсному WebSocket MEXC...');
+    final uri = Uri.parse(
+      'wss://stream.binance.com:9443/ws/${symbol.split('_').join('').toLowerCase()}@kline_$parentTimeframe',
+    );
+
+    final historicalData = await mexcClient.fetchKlineData(
+      symbol: symbol.split('_').join(),
+      interval: parentTimeframe,
+      limit: 150,
+    );
+
+    _parentCandles.addAll(historicalData);
+
+    await Future.delayed(Duration(seconds: 1));
+    _parentChannel = WebSocketChannel.connect(uri);
+    _parentChannel.stream.listen(
+      (data) {
+        _handleIncomingMessage(data, true);
+      },
+      onError: (error) => print('❌ Ошибка Parent WebSocket: $error'),
+      onDone: () {
+        print('📴 Parent Соединение закрыто');
+        connectParent();
+      },
+    );
+  }
+
+  void _handleIncomingMessage(dynamic message, bool isParent) {
     // print(message);
     try {
-      // 1. Проверяем, является ли сообщение строкой JSON (например, ping/pong)
       if (message is String) {
         final jsonMsg = jsonDecode(message);
         if (jsonMsg['channel'] == 'pong') {
           return; // Игнорируем ответы на ping
         }
-        // Обрабатываем сообщения с данными (например, push.kline)
         if (jsonMsg['e'] == 'kline') {
-          _processKlineData(jsonMsg);
+          _processKlineData(jsonMsg, isParent);
         }
-      }
-      // 2. Если сообщение бинарное (Protobuf) - десериализуем
-      else if (message is List<int>) {
+      } else if (message is List<int>) {
         print(
           '⚠️ Получены бинарные данные. Убедитесь в правильной десериализации Protobuf[citation:2][citation:6].',
         );
@@ -96,7 +122,7 @@ class MexcFuturesSignalBot {
     }
   }
 
-  void _processKlineData(dynamic klineData) {
+  void _processKlineData(dynamic klineData, bool isParent) {
     // Пример обработки JSON-данных свечи[citation:1]
     final candle = Candle(
       open: double.parse(klineData['k']['o'].toString()),
@@ -109,40 +135,65 @@ class MexcFuturesSignalBot {
 
     // _candles.add(candle);
     // Храним ограниченное количество свечей для расчетов
-    _addToBuffer(candle);
+    _addToBuffer(candle, isParent);
 
-    if (_candles.length > 200) _candles.removeAt(0);
+    if (isParent) {
+      if (_parentCandles.length > 200) _parentCandles.removeAt(0);
 
-    if (_candles.length > 50) {
-      // Ждем накопления данных
-      _checkForSignals();
-    }
-  }
+      if (_parentCandles.length > 50) {
+        // Ждем накопления данных
 
-  void _addToBuffer(Candle marketData) {
-    // Ищем, есть ли уже свеча с таким временем
-    final existingIndex = _candles.indexWhere(
-      (d) => d.time.isAtSameMomentAs(marketData.time),
-    );
-
-    if (existingIndex >= 0) {
-      // Обновляем существующую свечу (текущая еще формируется)
-      _candles[existingIndex] = marketData;
-    } else {
-      // Добавляем новую свечу
-      _candles.add(marketData);
-
-      // Поддерживаем размер буфера
-      if (_candles.length > 200) {
-        _candles.removeAt(0);
+        _checkParentSignals();
       }
+    } else {
+      if (_candles.length > 200) _candles.removeAt(0);
 
-      // Сортируем по времени (старые -> новые)
-      _candles.sort((a, b) => a.time.compareTo(b.time));
+      if (_candles.length > 50) {
+        // Ждем накопления данных
+
+        _checkForSignals();
+      }
     }
   }
 
-  void _checkForSignals() {
+  void _addToBuffer(Candle marketData, bool isParent) {
+    // Ищем, есть ли уже свеча с таким временем
+    if (isParent) {
+      final existingIndex = _parentCandles.indexWhere(
+        (d) => d.time.isAtSameMomentAs(marketData.time),
+      );
+
+      if (existingIndex >= 0) {
+        _parentCandles[existingIndex] = marketData;
+      } else {
+        _parentCandles.add(marketData);
+
+        if (_parentCandles.length > 200) {
+          _parentCandles.removeAt(0);
+        }
+
+        _parentCandles.sort((a, b) => a.time.compareTo(b.time));
+      }
+    } else {
+      final existingIndex = _candles.indexWhere(
+        (d) => d.time.isAtSameMomentAs(marketData.time),
+      );
+
+      if (existingIndex >= 0) {
+        _candles[existingIndex] = marketData;
+      } else {
+        _candles.add(marketData);
+
+        if (_candles.length > 200) {
+          _candles.removeAt(0);
+        }
+
+        _candles.sort((a, b) => a.time.compareTo(b.time));
+      }
+    }
+  }
+
+  Future<void> _checkForSignals() async {
     if (_candles.length < 150) return;
 
     List<double> closes = _candles.map((c) => c.close).toList();
@@ -161,12 +212,8 @@ class MexcFuturesSignalBot {
     // 3. Логика комбинированных сигналов
     if (waeSignal.isLong && rsiBullish) {
       if (_lastSignalWasLong == false || _lastSignalWasLong == null) {
-        if (useTrade) {
-          // executionManager.placeOrderOnWall(
-          //   symbol.split('_').first,
-          //   'BID',
-          //   currentPrice,
-          // );
+        if (useTrade && parentLastSignalWasLong == true) {
+          placeOrder(isLong: true, currentPrice: currentPrice);
         }
         telegramClient.sendSignal(
           symbol: symbol,
@@ -191,12 +238,8 @@ class MexcFuturesSignalBot {
       }
     } else if (waeSignal.isShort && rsiBearish) {
       if (_lastSignalWasLong == true || _lastSignalWasLong == null) {
-        if (useTrade) {
-          executionManager.placeOrderOnWall(
-            symbol.split('_').first,
-            'ASK',
-            currentPrice,
-          );
+        if (useTrade && parentLastSignalWasLong == false) {
+          placeOrder(isLong: false, currentPrice: currentPrice);
         }
         telegramClient.sendSignal(
           symbol: symbol,
@@ -225,7 +268,136 @@ class MexcFuturesSignalBot {
     // _printCurrentState(waeSignal, rsiBullish, rsiBearish);
   }
 
+  void _checkParentSignals() {
+    if (_parentCandles.length < 150) return;
+
+    List<double> closes = _parentCandles.map((c) => c.close).toList();
+    List<double> highs = _parentCandles.map((c) => c.high).toList();
+    List<double> lows = _parentCandles.map((c) => c.low).toList();
+
+    // 1. Получаем оба сигнала WAE
+    WAESignal waeSignal = _calculateWAE(closes, highs, lows);
+
+    // 2. Получаем ОБА сигнала RSI отдельно
+    bool rsiBullish = _calculateRsiMaBullish(closes); // RSI > MA
+    bool rsiBearish = _calculateRsiMaBearish(closes); // RSI < MA
+
+    double currentPrice = closes.isNotEmpty ? closes.last : 0.0;
+
+    // 3. Логика комбинированных сигналов
+    if (waeSignal.isLong && rsiBullish) {
+      if (parentLastSignalWasLong == false || parentLastSignalWasLong == null) {
+        print('\n${'=' * 60}');
+        print(
+          '✅ [${DateTime.now().toString().substring(11, 19)}] РОДИТЕЛЬСКИЙ СИГНАЛ LONG для $symbol',
+        );
+        print('   Текущая цена: \$${currentPrice.toStringAsFixed(2)}');
+        print(
+          '   WAE: БЫЧИЙ (trendUp: ${waeSignal.trendUp.toStringAsFixed(2)})',
+        );
+        print('   RSI MA Cross: БЫЧИЙ (RSI > MA)');
+        print('=' * 60);
+        parentLastSignalWasLong = true;
+      }
+    } else if (waeSignal.isShort && rsiBearish) {
+      if (parentLastSignalWasLong == true || parentLastSignalWasLong == null) {
+        print('\n${'=' * 60}');
+        print(
+          '🛑 [${DateTime.now().toString().substring(11, 19)}] РОДИТЕЛЬСКИЙ СИГНАЛ SHORT для $symbol',
+        );
+        print('   Текущая цена: \$${currentPrice.toStringAsFixed(2)}');
+        print(
+          '   WAE: МЕДВЕЖИЙ (trendDown: ${waeSignal.trendDown.toStringAsFixed(2)})',
+        );
+        print('   RSI MA Cross: МЕДВЕЖИЙ (RSI < MA)');
+        print('=' * 60);
+        parentLastSignalWasLong = false;
+      }
+    }
+
+    // _printCurrentState(waeSignal, rsiBullish, rsiBearish);
+  }
+
   // === РЕАЛИЗАЦИЯ ИНДИКАТОРОВ ===
+
+  void placeOrder({required bool isLong, required double currentPrice}) async {
+    print(currentPrice);
+    if (isLong) {
+      final sizing = PositionSizer.fromMarginUsd(
+        marginUsd: 20,
+        leverage: 10,
+        entryPrice: currentPrice,
+        szDecimals: resolvedPerpMarket.szDecimals,
+      );
+      print(
+        await exchangeClient.placeEntryWithTpSl(
+          asset: resolvedPerpMarket.asset,
+          isCross: false,
+          isBuy: true,
+          entryPx: double.parse(
+            currentPrice.toStringAsFixed(resolvedPerpMarket.szDecimals),
+          ),
+          size: sizing.finalSize,
+          takeProfitTriggerPx: double.parse(
+            takeProfitPriceCalc(
+              isBinance: false,
+              leverage: 10,
+              price: currentPrice,
+              isBid: true,
+            ).toStringAsFixed(resolvedPerpMarket.szDecimals),
+          ),
+          stopLossTriggerPx: double.parse(
+            calculateStopLossPrice(
+              isBid: true,
+              price: currentPrice,
+              leverage: 10,
+              lossPercent: 10,
+            ).toStringAsFixed(resolvedPerpMarket.szDecimals),
+          ),
+          groupAsNormalTpsl: true,
+          entryOrderType: ActionBuilders.limitOrderType(tif: 'Gtc'),
+          leverage: 10,
+        ),
+      );
+    } else {
+      final sizing = PositionSizer.fromMarginUsd(
+        marginUsd: 20,
+        leverage: 10,
+        entryPrice: currentPrice,
+        szDecimals: resolvedPerpMarket.szDecimals,
+      );
+      print(
+        await exchangeClient.placeEntryWithTpSl(
+          isCross: false,
+          asset: resolvedPerpMarket.asset,
+          isBuy: false,
+          entryPx: double.parse(
+            currentPrice.toStringAsFixed(resolvedPerpMarket.szDecimals),
+          ),
+          size: sizing.finalSize,
+          takeProfitTriggerPx: double.parse(
+            takeProfitPriceCalc(
+              isBinance: false,
+              leverage: 10,
+              price: currentPrice,
+              isBid: false,
+            ).toStringAsFixed(resolvedPerpMarket.szDecimals),
+          ),
+          stopLossTriggerPx: double.parse(
+            calculateStopLossPrice(
+              isBid: false,
+              price: currentPrice,
+              leverage: 10,
+              lossPercent: 10,
+            ).toStringAsFixed(resolvedPerpMarket.szDecimals),
+          ),
+          groupAsNormalTpsl: true,
+          entryOrderType: ActionBuilders.limitOrderType(tif: 'Gtc'),
+          leverage: 10,
+        ),
+      );
+    }
+  }
 
   WAESignal _calculateWAE(
     List<double> closes,
@@ -242,8 +414,6 @@ class MexcFuturesSignalBot {
       return WAESignal(false, false, 0.0, 0.0, 0.0, 0.0);
     }
 
-    // --- РАСЧЕТ КОМПОНЕНТОВ ---
-    int lastIdx = closes.length - 1;
     double emaFastCurrent = _calculateEMA(closes, waeFastlength);
     double emaSlowCurrent = _calculateEMA(closes, waeSlowlength);
     double macdCurrent = emaFastCurrent - emaSlowCurrent;
@@ -447,6 +617,7 @@ class MexcFuturesSignalBot {
 
   void dispose() {
     _channel.sink.close();
+    _parentChannel.sink.close();
     print('Бот остановлен.');
   }
 }

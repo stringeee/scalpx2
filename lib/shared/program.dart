@@ -83,7 +83,7 @@ class Program {
         "BONK_USDT": 100,
         "TRUMPOFFICIAL_USDT": 50,
         "BNB_USDT": 100,
-        "PUMPFUN_USDT": 100,
+        "PUMPFUN_USDT": 10,
         "TAO_USDT": 100,
         "ASTER_USDT": 100,
         "XPL_USDT": 100,
@@ -98,6 +98,7 @@ class Program {
         "SUI_USDT": 100,
         "ETH_USDT": 100,
         "AVAX_USDT": 100,
+        "SOL_USDT": 10,
       }[symbol] ??
       100;
 
