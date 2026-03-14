@@ -294,7 +294,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: b131e131db079ffabc4f7178650a85e2c9b28f8f
+      resolved-ref: "1afdec5f89d8335c36341aa792e38370500ebeac"
       url: "https://github.com/stringeee/hyperliquid_dart_sdk"
     source: git
     version: "0.1.0"

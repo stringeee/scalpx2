@@ -27,27 +27,9 @@ void main() async {
   );
 
   await mon.start();
+
   ResolvedPerpMarket market = await info.resolvePerpMarket(coin);
   print(market);
-
-  // final balanceManager = BalanceManager(api: api);
-  // final executionManager = ExecutionManager(
-  //   api: api,
-  //   minVolBySymbol: injector<Program>().minVolBySymbol,
-  //   qtyStepBySymbol: injector<Program>().qtyStepBySymbol,
-  //   balanceManager: balanceManager,
-  // );
-
-  // final bot1 = MexcFuturesSignalBot(
-  //   symbol: 'SUI_USDT',
-  //   timeframe: 'Min1',
-  //   restTimeframe: '1m',
-  //   executionManager: executionManager,
-  //   botToken: '8412594629:AAFSyVob1sIG4szV0XupcA0oVa6yhDFPmZQ',
-  //   // chatId: '469171720',
-  //   useTrade: true,
-  //   chatId: '469171720',
-  // );
 
   final bot2 = MexcFuturesMk1(
     symbol: '${coin}_USDT',
@@ -56,23 +38,18 @@ void main() async {
     exchangeClient: client,
     botToken: '8412594629:AAFSyVob1sIG4szV0XupcA0oVa6yhDFPmZQ',
     useTrade: true,
+    useParentFilter: false,
     chatId: '469171720',
     parentTimeframe: '1h',
     resolvedPerpMarket: market,
-    parentLastSignalWasLong: false,
+    infoClient: info,
+    user: user,
+    // parentLastSignalWasLong: false,
   );
 
-  // executionManager.wireOrderAndPositionUpdates(hl);
-  // hl.onAsset.listen((assetSnapshot) {
-  //   balanceManager.updateFromWebSocket(assetSnapshot);
-  // });
-
-  // hl.onCurrency.listen((currencySnapshot) {});
   try {
     await bot2.connect();
     await bot2.connectParent();
-    // await hl.start();
-    // await balanceManager.loadInitialBalance(); // Загружаем начальный баланс
 
     Timer.periodic(Duration(seconds: 30), (timer) async {
       config = await ConfigLoader.reloadConfig('config.json');
